@@ -12,6 +12,14 @@ spec:
       image: alpine:3
       command: [/bin/echo]
       args: ["$(params.message)"]
+      #  OpenShift's Pod Security admission controller
+      securityContext:
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
 
 ---
 apiVersion: tekton.dev/v1beta1
@@ -29,9 +37,14 @@ spec:
         - name: WORKSPACE_SOURCE_PATH
           value: $(workspaces.source.path)
       workingDir: $(workspaces.source.path)
+      #  OpenShift's Pod Security admission controller
       securityContext:
-        runAsNonRoot: false
-        runAsUser: 0
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
       script: |
         #!/usr/bin/env sh
         set -eu
@@ -49,3 +62,63 @@ spec:
           rm -rf "${WORKSPACE_SOURCE_PATH}"/..?*
         fi
 
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: nose
+spec:
+  params:
+    - name: args
+      description: Arguments to pass to nose
+      type: string
+      default: "-v"
+  workspaces:
+    - name: source
+  steps:
+    - name: nosetests
+      image: python:3.9-slim
+      workingDir: $(workspaces.source.path)
+      #  OpenShift's
+      env:
+      - name: HOME
+        value: /tekton/home
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "***** Environment *****"
+        python --version
+        pwd
+
+        echo "***** Installing dependencies *****"
+        # 1. Ensure pip is updated and necessary tools are installed
+        python -m pip install --upgrade pip wheel
+        
+        # 2. Install dependencies, including nose, from requirements.txt
+        #    Use the --user flag to install packages into a non-root-owned directory
+        #    which is common/necessary in secure container environments like OpenShift.
+        pip install --user -r requirements.txt
+        
+        # 3. Add the user's bin directory to PATH
+        #    This is where --user installations place executables like 'nosetests'.
+        export PATH="$PATH:$HOME/.local/bin"
+        
+        # 4. Verification (Optional but highly recommended)
+        if command -v nosetests &> /dev/null; then
+            echo "nosetests is found at: $(command -v nosetests)"
+        else
+            echo "ERROR: nosetests command not found after installation!"
+            exit 1
+        fi
+
+        echo "***** Running nosetests with: $(params.args)"
+        nosetests $(params.args)
+      #  OpenShift's Pod Security admission controller
+      securityContext:
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
