@@ -46,3 +46,10 @@ tkn task describe flake8
 curl -O https://raw.githubusercontent.com/tektoncd/catalog/main/task/flake8/0.1/flake8.yaml
 kubectl apply -f flake8.yaml
 ```
+
+Permission denied: '/.local'
+```
+env:
+      - name: HOME
+        value: /tekton/home
+```
